@@ -111,8 +111,8 @@ function createAIBot() {
         score: 0, kills: 0, deaths: 0,
         color: `hsl(0, 75%, 50%)`,
         isAlive: true, isAI: true,
-        state: 'patrol', targetX: 0, targetZ: 0,
-        lastShot: 0, fireRate: 600 + Math.random() * 400, damage: 12 + Math.floor(Math.random() * 5), speed: 3.5 + Math.random() * 1.5,
+        state: 'chase', targetX: 0, targetZ: 0,
+        lastShot: 0, fireRate: 500 + Math.random() * 400, damage: 15 + Math.floor(Math.random() * 6), speed: 6 + Math.random() * 2,
         stateTimer: 0, stuckTimer: 0, lastX: 0, lastZ: 0, lastDamage: 0
     };
     aiBots.push(bot);
@@ -200,6 +200,7 @@ function handleMessage(playerId, msg) {
                 speed: msg.speed || 100, life: 2, createdAt: Date.now(),
                 damage: (msg.damage || 34) * (player.damageBoost || 1)
             });
+            broadcast({ type: 'bulletSpawned', bullet: bullets[bullets.length - 1] });
             break;
 
         case 'hit': {
@@ -363,30 +364,24 @@ function updateAIBots(dt) {
             if (dist < nearestDist) { nearestDist = dist; nearestPlayer = p; }
         });
 
-        // 상태 머신
+        // 상태 머신 - 더 공격적으로
         bot.stateTimer -= dt;
 
-        if (bot.health < 30 && bot.state !== 'flee') {
+        if (bot.health < 25 && bot.state !== 'flee') {
             bot.state = 'flee'; bot.stateTimer = 3;
-        } else if (nearestDist < 40 && bot.state === 'patrol') {
+        } else if (nearestDist < 30) {
+            bot.state = nearestDist < 15 ? 'attack' : 'chase';
+        } else if (nearestDist < 60) {
             bot.state = 'chase';
-        } else if (nearestDist < 20 && bot.state === 'chase') {
-            bot.state = 'attack';
-        } else if (nearestDist > 50 && bot.state !== 'patrol') {
-            bot.state = 'patrol';
-        }
-
-        // 아이템 찾기
-        if (bot.state === 'patrol' && Math.random() < 0.005) {
-            let nearestItem = null, nearestItemDist = Infinity;
-            items.forEach(item => { if (!item.active) return; const dist = Math.sqrt((bot.x-item.x)**2 + (bot.z-item.z)**2); if (dist < nearestItemDist) { nearestItemDist = dist; nearestItem = item; } });
-            if (nearestItem && nearestItemDist < 50) { bot.targetX = nearestItem.x; bot.targetZ = nearestItem.z; bot.state = 'loot'; }
+        } else if (bot.state === 'patrol' && bot.stateTimer <= 0) {
+            bot.targetX = (Math.random()-0.5)*ARENA*1.5; bot.targetZ = (Math.random()-0.5)*ARENA*1.5; bot.stateTimer = 3+Math.random()*3;
+        } else if (bot.state !== 'patrol' && nearestDist > 80) {
+            bot.state = 'patrol'; bot.stateTimer = 2+Math.random()*2;
         }
 
         switch (bot.state) {
             case 'patrol':
-                if (bot.stateTimer <= 0) { bot.targetX = (Math.random()-0.5)*ARENA*1.5; bot.targetZ = (Math.random()-0.5)*ARENA*1.5; bot.stateTimer = 5+Math.random()*5; }
-                moveToward(bot, bot.targetX, bot.targetZ, bot.speed*0.6, dt); break;
+                moveToward(bot, bot.targetX, bot.targetZ, bot.speed*0.7, dt); break;
             case 'chase':
                 if (nearestPlayer) { moveToward(bot, nearestPlayer.x, nearestPlayer.z, bot.speed, dt); bot.yaw = Math.atan2(nearestPlayer.x-bot.x, nearestPlayer.z-bot.z); } break;
             case 'attack':
@@ -399,7 +394,9 @@ function updateAIBots(dt) {
                         const dir = { x: Math.sin(bot.yaw) + (Math.random()-0.5)*spread, y: (Math.random()-0.5)*spread*0.5 + 0.02, z: Math.cos(bot.yaw) + (Math.random()-0.5)*spread };
                         const len = Math.sqrt(dir.x*dir.x+dir.y*dir.y+dir.z*dir.z);
                         dir.x/=len; dir.y/=len; dir.z/=len;
-                        bullets.push({ id: bulletId++, ownerId: bot.id, ownerName: bot.name, ownerTeam: bot.team, x: bot.x, y: bot.y, z: bot.z, dx: dir.x, dy: dir.y, dz: dir.z, speed: 80, life: 2, createdAt: now, damage: bot.damage });
+                        const newBullet = { id: bulletId++, ownerId: bot.id, ownerName: bot.name, ownerTeam: bot.team, x: bot.x, y: bot.y, z: bot.z, dx: dir.x, dy: dir.y, dz: dir.z, speed: 80, life: 2, createdAt: now, damage: bot.damage };
+                        bullets.push(newBullet);
+                        broadcast({ type: 'bulletSpawned', bullet: newBullet });
                     }
                 } break;
             case 'flee':
@@ -424,7 +421,27 @@ function updateAIBots(dt) {
 
 function moveToward(bot, tx, tz, speed, dt) {
     const dx = tx-bot.x, dz = tz-bot.z, dist = Math.sqrt(dx*dx+dz*dz);
-    if (dist > 1) { bot.x += (dx/dist)*speed*dt; bot.z += (dz/dist)*speed*dt; bot.yaw = Math.atan2(dx, dz); }
+    if (dist > 0.5) {
+        const nx = (dx/dist)*speed*dt, nz = (dz/dist)*speed*dt;
+        let nx2 = bot.x + nx, nz2 = bot.z + nz;
+        // 건물 충돌 회피
+        for (const b of BUILDINGS) {
+            const hw = b.w/2 + 0.6, hd = b.d/2 + 0.6;
+            const bx = b.x, bz = b.z;
+            if (nx2 > bx - hw && nx2 < bx + hw && nz2 > bz - hd && nz2 < bz + hd) {
+                // 가장 가까운 가장자리로 밀어내기
+                const ox1 = nx2 - (bx - hw), ox2 = (bx + hw) - nx2;
+                const oz1 = nz2 - (bz - hd), oz2 = (bz + hd) - nz2;
+                const m = Math.min(ox1, ox2, oz1, oz2);
+                if (m === ox1) nx2 = bx - hw;
+                else if (m === ox2) nx2 = bx + hw;
+                else if (m === oz1) nz2 = bz - hd;
+                else nz2 = bz + hd;
+                break;
+            }
+        }
+        bot.x = nx2; bot.z = nz2; bot.yaw = Math.atan2(dx, dz);
+    }
 }
 
 // ============ 비행기 보급 ============

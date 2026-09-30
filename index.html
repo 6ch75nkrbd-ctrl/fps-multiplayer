@@ -948,7 +948,21 @@
     function updateRemoteBullets(serverBullets) {
         const activeIds = new Set(serverBullets.map(b => b.id));
         remoteBullets.forEach((rb, id) => { if (!activeIds.has(id)) { scene.remove(rb.mesh); remoteBullets.delete(id); } });
-        serverBullets.forEach(sb => { if (sb.ownerId === myId) return; const rb = remoteBullets.get(sb.id); if (rb) rb.mesh.position.set(sb.x, sb.y, sb.z); });
+        serverBullets.forEach(sb => {
+            if (sb.ownerId === myId) return;
+            let rb = remoteBullets.get(sb.id);
+            if (!rb) {
+                // state에서 새로 발견된 총알 (bulletSpawned 놓친 경우)
+                const isEnemy = typeof sb.ownerId === 'string';
+                const color = isEnemy ? 0xff4444 : 0xffaa00;
+                const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({color}));
+                mesh.position.set(sb.x, sb.y, sb.z);
+                scene.add(mesh);
+                rb = { mesh, data: sb };
+                remoteBullets.set(sb.id, rb);
+            }
+            rb.mesh.position.set(sb.x, sb.y, sb.z);
+        });
     }
 
     // ============ 히트 처리 ============
