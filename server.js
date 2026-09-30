@@ -201,6 +201,7 @@ function handleMessage(playerId, msg) {
                 damage: (msg.damage || 34) * (player.damageBoost || 1)
             });
             broadcast({ type: 'bulletSpawned', bullet: bullets[bullets.length - 1] });
+            if (!player._shotLog || Date.now() - player._shotLog > 3000) { player._shotLog = Date.now(); console.log(`[사격] ${player.name} → #${bullets[bullets.length-1].id} (총알 수: ${bullets.length})`); }
             break;
 
         case 'hit': {
