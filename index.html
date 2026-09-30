@@ -764,10 +764,74 @@
         origin.add(dir.clone().multiplyScalar(0.5));
 
         send({ type:'shoot', x:origin.x, y:origin.y, z:origin.z, dx:dir.x, dy:dir.y, dz:dir.z, speed:100, damage: 34 * gameState.damageBoost });
+
+        // 로컬 총알 트레이서 (내 총알 시각화)
+        spawnLocalTracer(origin, dir);
+
+        // 머즐 플래시
+        showMuzzleFlash();
+
         gun.position.z = -0.45;
         setTimeout(() => gun.position.z = -0.5, 50);
         updateHUD();
         if (gameState.ammo <= 0) reload();
+    }
+
+    // 로컬 총알 트레이서 (내가 쏜 총알 시각화)
+    const localTracers = [];
+    function spawnLocalTracer(origin, dir) {
+        // 총알 메시 (노란색 작은 구체)
+        const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.15, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffdd44 })
+        );
+        mesh.position.copy(origin);
+        scene.add(mesh);
+        localTracers.push({ mesh, dir: dir.clone(), life: 0.3, dist: 0 });
+
+        // 총궤적 (라인)
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+            origin.clone(),
+            origin.clone().add(dir.clone().multiplyScalar(30))
+        ]);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 });
+        const line = new THREE.Line(lineGeo, lineMat);
+        scene.add(line);
+        localTracers.push({ mesh: line, dir: dir.clone(), life: 0.15, dist: 0, isLine: true });
+    }
+
+    function updateLocalTracers(delta) {
+        for (let i = localTracers.length - 1; i >= 0; i--) {
+            const t = localTracers.length - 1 - i;
+            const tr = localTracers[i];
+            tr.life -= delta;
+            if (!tr.isLine) {
+                tr.dist += 100 * delta;
+                tr.mesh.position.add(tr.dir.clone().multiplyScalar(100 * delta));
+            } else {
+                tr.mesh.material.opacity *= 0.85;
+            }
+            if (tr.life <= 0) {
+                scene.remove(tr.mesh);
+                if (tr.mesh.geometry) tr.mesh.geometry.dispose();
+                if (tr.mesh.material) tr.mesh.material.dispose();
+                localTracers.splice(i, 1);
+            }
+        }
+    }
+
+    // 머즐 플래시
+    function showMuzzleFlash() {
+        const flash = new THREE.PointLight(0xffaa00, 3, 8);
+        flash.position.set(0.3, -0.25, -0.8);
+        camera.add(flash);
+        const flashMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.9 })
+        );
+        flashMesh.position.set(0.3, -0.25, -0.9);
+        camera.add(flashMesh);
+        setTimeout(() => { camera.remove(flash); camera.remove(flashMesh); }, 60);
     }
 
     // 연사 처리
@@ -941,27 +1005,55 @@
     // ============ 리모트 총알 ============
     function spawnRemoteBullet(b) {
         if (b.ownerId === myId) return;
-        const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({color:0xffaa00}));
+        const isEnemy = typeof b.ownerId === 'string';
+        const color = isEnemy ? 0xff4444 : 0xffaa00;
+        // 총알 구체
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({color}));
         mesh.position.set(b.x, b.y, b.z);
-        scene.add(mesh); remoteBullets.set(b.id, { mesh, data: b });
+        scene.add(mesh);
+        // 총궤적 (짧은 선)
+        let line = null;
+        if (b.dx !== undefined) {
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(b.x, b.y, b.z),
+                new THREE.Vector3(b.x - b.dx*3, b.y - b.dy*3, b.z - b.dz*3)
+            ]);
+            const lineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
+            line = new THREE.Line(lineGeo, lineMat);
+            scene.add(line);
+        }
+        remoteBullets.set(b.id, { mesh, line, data: b });
     }
     function updateRemoteBullets(serverBullets) {
         const activeIds = new Set(serverBullets.map(b => b.id));
-        remoteBullets.forEach((rb, id) => { if (!activeIds.has(id)) { scene.remove(rb.mesh); remoteBullets.delete(id); } });
+        remoteBullets.forEach((rb, id) => {
+            if (!activeIds.has(id)) {
+                scene.remove(rb.mesh);
+                if (rb.line) scene.remove(rb.line);
+                remoteBullets.delete(id);
+            }
+        });
         serverBullets.forEach(sb => {
             if (sb.ownerId === myId) return;
             let rb = remoteBullets.get(sb.id);
             if (!rb) {
-                // state에서 새로 발견된 총알 (bulletSpawned 놓친 경우)
+                // state에서 새로 발견된 총알
                 const isEnemy = typeof sb.ownerId === 'string';
                 const color = isEnemy ? 0xff4444 : 0xffaa00;
-                const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({color}));
+                const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({color}));
                 mesh.position.set(sb.x, sb.y, sb.z);
                 scene.add(mesh);
-                rb = { mesh, data: sb };
+                rb = { mesh, line: null, data: sb };
                 remoteBullets.set(sb.id, rb);
             }
             rb.mesh.position.set(sb.x, sb.y, sb.z);
+            // 궤적 업데이트
+            if (rb.line && sb.dx !== undefined) {
+                const positions = rb.line.geometry.attributes.position;
+                positions.setXYZ(0, sb.x, sb.y, sb.z);
+                positions.setXYZ(1, sb.x - sb.dx*3, sb.y - sb.dy*3, sb.z - sb.dz*3);
+                positions.needsUpdate = true;
+            }
         });
     }
 
@@ -1446,6 +1538,7 @@
             handleAutoFire();
             checkItemPickup();
             drawMinimap();
+            updateLocalTracers(delta);
 
             // 보급 상자 근처 표시
             let nearSupply = false;
