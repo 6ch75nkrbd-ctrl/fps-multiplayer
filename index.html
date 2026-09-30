@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FPS Multiplayer</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>FPS Multiplayer v3</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
@@ -777,30 +780,30 @@
         if (gameState.ammo <= 0) reload();
     }
 
-    // 로컬 총알 트레이서 (내가 쏜 총알 시각화) - 크고 밝게!
+    // 로컬 총알 트레이서 (내가 쏜 총알 시각화) - 극도로 크고 밝게!
     const localTracers = [];
     function spawnLocalTracer(origin, dir) {
-        // 1. 총알 본체 (크고 밝은 노란 구체)
+        // 1. 총알 본체 (매우 크고 밝은 노란 구체)
         const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.25, 8, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffee00 })
+            new THREE.SphereGeometry(0.4, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xffff00 })
         );
         mesh.position.copy(origin);
         mesh.renderOrder = 999;
         scene.add(mesh);
-        localTracers.push({ mesh, dir: dir.clone(), life: 0.5, dist: 0, isLine: false });
+        localTracers.push({ mesh, dir: dir.clone(), life: 0.6, dist: 0, isLine: false });
 
-        // 2. 긴 총궤적 (밝은 선)
+        // 2. 총궤적 (밝고 긴 선)
         const linePoints = [
             origin.clone(),
-            origin.clone().add(dir.clone().multiplyScalar(8))
+            origin.clone().add(dir.clone().multiplyScalar(12))
         ];
         const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
-        const lineMat = new THREE.LineBasicMaterial({ color: 0xffdd00, transparent: true, opacity: 0.9, linewidth: 2 });
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xffff44, transparent: true, opacity: 1.0 });
         const line = new THREE.Line(lineGeo, lineMat);
         line.renderOrder = 998;
         scene.add(line);
-        localTracers.push({ mesh: line, dir: dir.clone(), life: 0.1, dist: 0, isLine: true });
+        localTracers.push({ mesh: line, dir: dir.clone(), life: 0.15, dist: 0, isLine: true });
     }
 
     function updateLocalTracers(delta) {
